@@ -157,7 +157,7 @@ const toolDefinitions = [
     }
 ];
 
-
+// ─── Tool Executor ─────────────────────────────────────────────────────────────
 
 async function executeTool(toolName, toolArgs) {
     console.log(`\n🔧 Executing tool  : ${toolName}`);
@@ -189,36 +189,10 @@ async function executeTool(toolName, toolArgs) {
     return result;
 }
 
-
+// ─── System Prompt ─────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `
-You are an expert AI Procurement Agent specialized in industrial components sourcing.
-Your mission is to help industrial buyers find, compare, and select the best suppliers
-for their technical requirements — reducing sourcing time from hours to minutes.
-
-════════════════════════════════════════════════════════
-CORE RESPONSIBILITIES
-════════════════════════════════════════════════════════
-
-1. UNDERSTAND the buyer's technical requirement precisely
-   - Extract component type, power rating, protection index, standards
-   - Identify the industrial sector (food, chemical, oil & gas, manufacturing...)
-   - Detect the target market/region (Europe, North America, Global...)
-
-2. SEARCH systematically using available tools
-   - Always start with searchSuppliers
-   - Then run comparePrices, checkCertifications, assessRisk in parallel logic
-   - Never skip a tool — each provides critical data for the final recommendation
-
-3. ANALYZE results with industrial expertise
-   - Cross-reference prices against market standards
-   - Flag missing certifications as blockers or warnings
-   - Weight risks appropriately for the industrial context
-
-4. RECOMMEND with clear justification
-   - Identify the best supplier based on the Procurement Score
-   - Explain WHY this supplier is recommended with specific data points
-   - Flag any trade-offs the buyer should be aware of
+You are SupplyPilot, an expert AI Procurement Agent specialized in industrial components sourcing.
 
 ════════════════════════════════════════════════════════
 TOOL USAGE RULES
@@ -229,17 +203,15 @@ MANDATORY sequence for every procurement request:
   Step 2 → comparePrices        (use IDs from step 1)
   Step 3 → checkCertifications  (use IDs from step 1, infer required certs)
   Step 4 → assessRisk           (use IDs from step 1)
-  Step 5 → Generate final recommendation (after all tools complete)
+  Step 5 → Generate final JSON response (ONLY after all 4 tools complete)
 
-NEVER generate a recommendation without running ALL 4 tools first.
+NEVER generate a response without running ALL 4 tools first.
 NEVER invent supplier data — only use what the tools return.
 NEVER skip certifications check — it is a legal compliance requirement.
 
 ════════════════════════════════════════════════════════
 CERTIFICATION INFERENCE RULES
 ════════════════════════════════════════════════════════
-
-Apply these rules automatically based on user context:
 
   European deployment     → require [CE, IEC]
   Food & beverage sector  → require [CE, IEC, ISO9001]
@@ -253,42 +225,71 @@ Apply these rules automatically based on user context:
 FINAL RESPONSE FORMAT
 ════════════════════════════════════════════════════════
 
-After all tools have been executed, structure your response as follows:
+After ALL 4 tools have been executed, respond with a single valid JSON object.
+No markdown, no backticks, no preamble — pure JSON only.
 
----
-## 🔍 Request Analysis
-[Summarize what you understood from the user's request]
-[List extracted technical specs]
+{
+  "request_summary": {
+    "component_type": "string",
+    "power": "string or null",
+    "protection": "string or null",
+    "standards": ["string"],
+    "region": "string",
+    "industry": "string"
+  },
+  "suppliers_overview": {
+    "total_found": number,
+    "compliant_count": number,
+    "non_compliant_count": number
+  },
+  "compliance": [
+    {
+      "supplier_name": "string",
+      "is_compliant": boolean,
+      "certifications_held": ["string"],
+      "missing_certifications": ["string"],
+      "compliance_verdict": "✅ Fully compliant | ⚠️ Partial | ❌ Non-compliant"
+    }
+  ],
+  "risk_summary": [
+    {
+      "supplier_name": "string",
+      "risk_level": "low | medium | high",
+      "risk_factors": ["string"],
+      "country": "string"
+    }
+  ],
+  "recommendation": {
+    "top_supplier": "string",
+    "score": number,
+    "justification": "2-3 sentences explaining WHY this supplier wins with specific data points (price, delivery, certs)",
+    "trade_offs": "any downsides or caveats the buyer should know"
+  },
+  "rejection_reasons": [
+    {
+      "supplier_name": "string",
+      "reason": "specific reason why this supplier was not recommended"
+    }
+  ],
+  "market_insights": [
+    "observation 1 derived from the data — e.g. European suppliers are 18% more expensive but deliver 2x faster",
+    "observation 2 — e.g. Only 2 out of 5 suppliers hold ATEX in this dataset"
+  ],
+  "price_analysis": {
+    "min": number,
+    "max": number,
+    "average": number,
+    "currency": "EUR",
+    "spread_percent": number
+  }
+}
 
-## 🏭 Suppliers Found
-[Number of suppliers found and brief overview]
-
-## ⚠️ Compliance Status
-[List which suppliers are compliant and which have missing certifications]
-[Flag any non-compliant supplier clearly]
-
-## 📊 Risk Assessment
-[Summarize risk levels across suppliers]
-[Highlight any high-risk suppliers and explain why]
-
-## ✅ Recommendation
-[Name the recommended supplier]
-[Justify with specific data: price, delivery, score, certifications]
-[Mention trade-offs if any]
-
-## 💡 Additional Insights
-[Any market observations, price anomalies, or sourcing advice]
----
-
-════════════════════════════════════════════════════════
-TONE & LANGUAGE
-════════════════════════════════════════════════════════
-
+RULES:
 - Always respond in the same language as the user's message
-- Be professional, precise, and data-driven
-- Use industrial terminology appropriate to the sector
-- Avoid vague statements — always back claims with numbers from tool results
-- If data is insufficient, state it clearly rather than guessing
+- market_insights must contain at least 2 meaningful observations from the actual data
+- rejection_reasons must cover every supplier that is NOT the top recommendation
+- spread_percent = Math.round(((max - min) / average) * 100)
+- The JSON must be valid and parseable — no trailing commas, no comments inside
 `;
 
 // ─── Main Agent Function ───────────────────────────────────────────────────────
@@ -306,15 +307,14 @@ export async function runProcurementAgent(userMessage) {
         tools: [{ functionDeclarations: toolDefinitions }],
         systemInstruction: SYSTEM_PROMPT,
         generationConfig: {
-            temperature: 0.2,      // low = more precise, less creative
+            temperature: 0.2,
             topP: 0.8,
-            maxOutputTokens: 2048
+            maxOutputTokens: 4096   // increased for richer structured JSON
         }
     });
 
     const chat = model.startChat();
 
-    // Collected results from each tool
     let suppliersResult      = null;
     let pricesResult         = null;
     let certificationsResult = null;
@@ -337,14 +337,25 @@ export async function runProcurementAgent(userMessage) {
         const toolCalls = parts.filter(p => p.functionCall);
         const textParts = parts.filter(p => p.text);
 
-        // No more tool calls → Gemini has finished its analysis
+        // ── No more tool calls → Gemini finished ──────────────────────────────
         if (toolCalls.length === 0) {
 
-            console.log("\n✅ All tools completed — building final response");
+            console.log("\n✅ All tools completed — parsing structured response");
 
-            const finalText = textParts.map(p => p.text).join("");
+            const rawText = textParts.map(p => p.text).join("");
 
+            // Parse structured JSON from Gemini
+            let structuredAnalysis = null;
+            try {
+                const clean = rawText.replace(/```json|```/g, "").trim();
+                structuredAnalysis = JSON.parse(clean);
+                console.log("\n📋 Structured analysis parsed successfully");
+            } catch (e) {
+                console.warn("⚠️  Could not parse structured JSON — storing raw text");
+                structuredAnalysis = { raw: rawText };
+            }
 
+            // Procurement scores (computed locally, not by Gemini)
             let scores = [];
             if (suppliersResult && pricesResult && certificationsResult && risksResult) {
                 scores = calculateProcurementScores(
@@ -357,49 +368,56 @@ export async function runProcurementAgent(userMessage) {
                 scores.forEach(s => {
                     console.log(`   ${s.supplier_name.padEnd(20)} → ${s.score}/100`);
                 });
+
+                // Inject computed scores into structuredAnalysis for frontend use
+                if (structuredAnalysis && !structuredAnalysis.raw) {
+                    structuredAnalysis.scores = scores;
+
+                    // Sync recommendation score with computed value
+                    if (structuredAnalysis.recommendation && scores[0]) {
+                        structuredAnalysis.recommendation.score      = scores[0].score;
+                        structuredAnalysis.recommendation.top_supplier = scores[0].supplier_name;
+                    }
+                }
             }
 
             // Save report to MongoDB
             if (scores.length > 0) {
-                await Report.create({
-                    query: userMessage,
-                    suppliers_analyzed: scores.map(s => ({
-                        supplier_name:     s.supplier_name,
-                        price:             s.price,
-                        delivery_days:     s.delivery_days,
-                        certifications:    s.certifications,
-                        warranty_years:    suppliersResult.find(
-                                               sup => sup.name === s.supplier_name
-                                           )?.warranty_years || 0,
-                        procurement_score: s.score
-                    })),
-                    recommendation: {
-                        supplier_name: scores[0].supplier_name,
-                        reason:        finalText,
-                        score:         scores[0].score
-                    },
-                    score_breakdown: {
-                        price_weight:        40,
-                        delivery_weight:     25,
-                        certification_weight: 20,
-                        reliability_weight:  15
-                    }
-                });
-                console.log("\n💾 Report saved to MongoDB");
+                try {
+                    await Report.create({
+                        query: userMessage,
+                        suppliers_analyzed: scores.map(s => ({
+                            supplier_name:     s.supplier_name,
+                            price:             s.price,
+                            delivery_days:     s.delivery_days,
+                            certifications:    s.certifications,
+                            warranty_years:    suppliersResult.find(
+                                sup => sup.name === s.supplier_name
+                            )?.warranty_years || 0,
+                            procurement_score: s.score
+                        })),
+                        recommendation: {
+                            supplier_name: scores[0].supplier_name,
+                            reason:        structuredAnalysis?.recommendation?.justification || rawText,
+                            score:         scores[0].score
+                        },
+                        score_breakdown: {
+                            price_weight:         40,
+                            delivery_weight:      25,
+                            certification_weight: 20,
+                            reliability_weight:   15
+                        }
+                    });
+                    console.log("\n💾 Report saved to MongoDB");
+                } catch (dbErr) {
+                    console.error("⚠️  Failed to save report:", dbErr.message);
+                }
             }
 
             return {
                 success: true,
-                query:          userMessage,
-                suppliers:      suppliersResult,
-                prices:         pricesResult,
-                certifications: certificationsResult,
-                risks:          risksResult,
-                scores,
-                recommendation: {
-                    text:         finalText,
-                    top_supplier: scores[0] || null
-                },
+                query:    userMessage,
+                analysis: structuredAnalysis,   // full structured JSON for frontend
                 metadata: {
                     iterations_used: iterations,
                     tools_called:    4,
@@ -408,7 +426,7 @@ export async function runProcurementAgent(userMessage) {
             };
         }
 
-      
+        // ── Execute tool calls and send results back to Gemini ─────────────────
 
         const toolResults = [];
 
@@ -429,7 +447,6 @@ export async function runProcurementAgent(userMessage) {
             });
         }
 
-        // Send tool results back to Gemini
         currentMessage = toolResults;
     }
 

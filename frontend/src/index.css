@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+
+html{
+  scroll-behaviour: smooth;
+}
+
+*{
+  box-sizing : border-box;
+}
+
+body {
+  font-family: 'Sora', 'Inter', sans-serif;
+  margin: 0;
+  padding-top: 60px;
+  min-height: 100vh;
+  background-color: #05080F;
+  background-image:
+    radial-gradient(ellipse 80% 40% at 50% -5%, #0D1829 0%, transparent 70%),
+    radial-gradient(circle at 75% 90%, rgba(37,99,235,.08) 0%, transparent 50%),
+    radial-gradient(rgba(255,255,255,.055) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 24px 24px;
+}
